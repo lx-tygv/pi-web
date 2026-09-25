@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { homedir } from "os";
+import { homedir } from "@/lib/home-dir";
 import path from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { loadSkillsWithInstallInfo } from "@/lib/skills-service";
@@ -12,9 +12,8 @@ export const dynamic = "force-dynamic";
 // GET /api/skills?cwd=<path>
 // Uses DefaultResourceLoader (same logic as AgentSession startup) so settings.json
 // skill paths, package skills, and .agents/skills directories are all included.
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const cwd = searchParams.get("cwd");
+export async function GET(req: NextRequest) {
+  const cwd = req.nextUrl.searchParams.get("cwd");
   if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
 
   try {

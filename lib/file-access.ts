@@ -1,11 +1,24 @@
-import { readdirSync } from "fs";
-import { homedir } from "os";
+import { readdirSync as nodeReaddirSync } from "fs";
+import { homedir } from "./home-dir";
 import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { isExistingPathWithinRoots, isPathWithinRoots } from "./path-security";
 import { listAllSessions } from "./session-reader";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 export { isWindowsAbsolutePath } from "./paths";
+
+// @vercel/nft (Next's build-time file tracer) statically expands fs.readdirSync
+// calls whose callee it can trace back to the fs module and whose directory
+// argument it can evaluate — a readdirSync(homedir()) would be expanded into a
+// recursive glob over the entire user profile, which then dies on exotic files
+// (cloud-sync drivers return EPERM instead of EINVAL on readlink).
+//
+// The wrapper must survive nft's evaluator, which folds `.bind()` calls back
+// to the original function value (so a plain .bind() indirection no longer
+// hides the callee). A fresh arrow function is a new value the evaluator
+// cannot attribute to fs.readdirSync; runtime behavior is unchanged.
+const readdirSync =
+  ((...args: Parameters<typeof nodeReaddirSync>) => nodeReaddirSync(...args)) as typeof nodeReaddirSync;
 
 // Short-TTL cache for the allowed-roots set. Without this, every file list/read
 // request re-scans every pi session on disk just to check access. 5s is short

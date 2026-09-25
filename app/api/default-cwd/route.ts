@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { mkdirSync } from "fs";
-import { homedir } from "os";
+import { homedir } from "@/lib/home-dir";
 import { join } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 

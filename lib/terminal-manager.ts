@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { homedir } from "os";
+import { homedir } from "./home-dir";
 import type { IPty } from "node-pty";
 import { samePath } from "./paths";
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { statSync, type Stats } from "fs";
-import { homedir } from "os";
+import { homedir } from "@/lib/home-dir";
 import { isAbsolute, resolve } from "path";
 import { allowFileRoot } from "@/lib/file-access";
 import { projectIdentityKey } from "@/lib/project-identity";

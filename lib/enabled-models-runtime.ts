@@ -1,4 +1,4 @@
-import { homedir } from "os";
+import { homedir } from "./home-dir";
 import { join, sep } from "path";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Api, Model } from "@earendil-works/pi-ai";

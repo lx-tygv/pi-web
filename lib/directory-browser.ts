@@ -1,5 +1,5 @@
 import { readdir, realpath, stat } from "fs/promises";
-import { homedir } from "os";
+import { homedir } from "./home-dir";
 import path from "path";
 
 export interface BrowsableDirectory {

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
+import { homedir } from "./home-dir";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 import type { SkillInfo, SkillInstallInfo, SkillInstallScope } from "@/lib/api-types";
 
