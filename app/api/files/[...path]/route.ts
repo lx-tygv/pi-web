@@ -26,6 +26,12 @@ import {
 } from "@/lib/file-upload";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { filePathFromApiSegments, samePath } from "@/lib/paths";
+import {
+  deleteEntry,
+  isAllowedRootPath,
+  validateDeleteTargetName,
+} from "@/lib/file-delete";
+import { moveToTrash, parseDeleteMode } from "@/lib/file-trash";
 import { readTextPreviewChunk } from "@/lib/text-preview";
 
 const IGNORED_NAMES = new Set([
@@ -108,6 +114,95 @@ async function getUploadDirectory(segments: string[]): Promise<
   }
 
   return { directory: realDirectory };
+}
+
+function resolveRealRoots(allowedRoots: Set<string>): Set<string> {
+  const realRoots = new Set<string>();
+  for (const root of allowedRoots) {
+    try {
+      realRoots.add(fs.realpathSync(root));
+    } catch {
+      // Ignore stale session roots that no longer exist.
+    }
+  }
+  return realRoots;
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  if (!isApiRequestAllowed(request)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+
+  try {
+    const { path: segments } = await params;
+    const targetPath = filePathFromApiSegments(segments);
+    // Trash is the recoverable default; unrecoverable deletion is opt-in.
+    const deleteMode = parseDeleteMode(request.nextUrl.searchParams.get("permanent"));
+
+    const nameError = validateDeleteTargetName(path.basename(targetPath));
+    if (nameError) {
+      return NextResponse.json({ error: nameError }, { status: 400 });
+    }
+
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isFilePathAllowed(targetPath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    // An allowed root backs session cwds and the browser itself; deleting it
+    // would orphan every session pointing there.
+    if (isAllowedRootPath(targetPath, allowedRoots)) {
+      return NextResponse.json({ error: "Cannot delete a browsable root directory" }, { status: 400 });
+    }
+
+    let lstat: fs.Stats;
+    try {
+      lstat = fs.lstatSync(targetPath);
+    } catch {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Authorize where the bytes live before removing anything. The parent
+    // directory's real location decides for symlinks (the link itself is
+    // unlinked, never followed); everything else must also resolve inside
+    // the real roots, mirroring the upload path's symlink protection.
+    const realRoots = resolveRealRoots(allowedRoots);
+    const realParent = fs.realpathSync(path.dirname(targetPath));
+    if (!isFilePathAllowed(realParent, realRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!lstat.isSymbolicLink()) {
+      const realTarget = fs.realpathSync(targetPath);
+      if (!isFilePathAllowed(realTarget, realRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    }
+
+    if (deleteMode === "permanent") {
+      const outcome = deleteEntry(targetPath, lstat);
+      if (!outcome.ok) {
+        return NextResponse.json(
+          { error: outcome.error },
+          { status: outcome.notFound ? 404 : 500 },
+        );
+      }
+      return NextResponse.json({ deleted: path.basename(targetPath), mode: deleteMode });
+    }
+
+    try {
+      await moveToTrash(targetPath);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({ deleted: path.basename(targetPath), mode: deleteMode });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
 
 function parseUploadFileNames(value: unknown): string[] | null {

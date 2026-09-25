@@ -194,6 +194,16 @@ function MentionIcon({ size = 11 }: { size?: number }) {
   );
 }
 
+function DeleteIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
 function DismissButton({ onClick, title }: { onClick: () => void; title: string }) {
   return (
     <button
@@ -219,6 +229,7 @@ function TreeNode({
   cwd,
   onOpenFile,
   onAtMention,
+  onDelete,
   expandedPaths,
   onToggleExpanded,
   refreshToken,
@@ -232,6 +243,7 @@ function TreeNode({
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
+  onDelete?: (node: FileNode) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
   refreshToken?: string;
@@ -372,7 +384,7 @@ function TreeNode({
             title={t("files.insertPath")}
             style={{
               position: "absolute",
-              right: !node.isDir ? 28 : 4,
+              right: !node.isDir ? 52 : 28,
               top: "50%",
               transform: "translateY(-50%)",
               display: "flex",
@@ -403,7 +415,7 @@ function TreeNode({
             title={t("files.download")}
             style={{
               position: "absolute",
-              right: 4,
+              right: 28,
               top: "50%",
               transform: "translateY(-50%)",
               display: "flex",
@@ -430,6 +442,37 @@ function TreeNode({
             </svg>
           </a>
         )}
+        {onDelete && hovered && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(node);
+            }}
+            title={node.isDir ? t("files.deleteFolder") : t("files.delete")}
+            aria-label={t("files.delete")}
+            style={{
+              position: "absolute",
+              right: 4,
+              top: "50%",
+              transform: "translateY(-50%)",
+              width: 20,
+              height: 20,
+              padding: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = "#f87171"; e.currentTarget.style.borderColor = "#f87171"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          >
+            <DeleteIcon />
+          </button>
+        )}
       </div>
       {node.isDir && open && (
         <div>
@@ -441,6 +484,7 @@ function TreeNode({
               cwd={cwd}
               onOpenFile={onOpenFile}
               onAtMention={onAtMention}
+              onDelete={onDelete}
               expandedPaths={expandedPaths}
               onToggleExpanded={onToggleExpanded}
               refreshToken={refreshToken}
@@ -606,6 +650,9 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<FileNode | null>(null);
+  const [permanentDelete, setPermanentDelete] = useState(false);
   const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
   const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -826,6 +873,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       setUploadSummary(null);
       setPendingConflict(null);
       setUploadError(null);
+      setDeleteError(null);
     }
 
     setLoading(cwdChanged);
@@ -861,6 +909,30 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   useEffect(() => {
     onChangesCountChange?.(gitFiles.length);
   }, [gitFiles, onChangesCountChange]);
+
+  const handleDelete = useCallback((node: FileNode) => {
+    setDeleteError(null);
+    setPermanentDelete(false);
+    setPendingDelete(node);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    const node = pendingDelete;
+    if (!node) return;
+    setPendingDelete(null);
+    setDeleteError(null);
+    try {
+      const permanent = permanentDelete ? "?permanent=1" : "";
+      const res = await fetch(`/api/files/${encodeFilePathForApi(node.fullPath)}${permanent}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? `Delete failed (HTTP ${res.status})`);
+      }
+      setTreeRefreshKey((key) => key + 1);
+    } catch (deleteFailure) {
+      setDeleteError(deleteFailure instanceof Error ? deleteFailure.message : String(deleteFailure));
+    }
+  }, [pendingDelete, permanentDelete]);
 
   const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
 
@@ -992,6 +1064,64 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         </div>
       )}
 
+      {deleteError && (
+        <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", borderBottom: "1px solid var(--border)", fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+          <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{deleteError}</span>
+          <DismissButton onClick={() => setDeleteError(null)} title={t("files.dismissError")} />
+        </div>
+      )}
+
+      {pendingDelete && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-label={t("files.delete")}
+          onClick={() => setPendingDelete(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)", padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: 320, maxWidth: "100%", padding: 14, background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "0 8px 28px rgba(0,0,0,0.35)" }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", marginBottom: 6 }}>
+              {t("files.delete")}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.4, overflowWrap: "anywhere" }}>
+              {pendingDelete.isDir
+                ? t("files.deleteDirConfirm", { name: getRelativeFilePath(pendingDelete.fullPath, cwd) })
+                : t("files.deleteFileConfirm", { name: getRelativeFilePath(pendingDelete.fullPath, cwd) })}
+            </div>
+            <label
+              style={{ display: "flex", alignItems: "flex-start", gap: 6, marginTop: 10, fontSize: 11, color: "var(--text)", cursor: "pointer", lineHeight: 1.4 }}
+            >
+              <input
+                type="checkbox"
+                checked={permanentDelete}
+                onChange={(e) => setPermanentDelete(e.target.checked)}
+                style={{ margin: 0, marginTop: 2, flexShrink: 0, accentColor: "#ef4444" }}
+              />
+              <span>{t("files.deletePermanently")}</span>
+            </label>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => setPendingDelete(null)}
+                style={{ height: 24, padding: "0 10px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 11 }}
+              >
+                {t("files.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelete()}
+                style={{ height: 24, padding: "0 10px", border: "1px solid #ef4444", borderRadius: 4, background: permanentDelete ? "#ef4444" : "transparent", color: permanentDelete ? "#fff" : "#ef4444", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
+              >
+                {t("files.delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {fileSearchOpen && (
       <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
         <div style={{ position: "relative" }}>
@@ -1038,6 +1168,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     cwd={cwd}
                     onOpenFile={onOpenFile}
                     onAtMention={onAtMention}
+                    onDelete={handleDelete}
                     expandedPaths={searchExpanded}
                     onToggleExpanded={(fullPath, open) => {
                       setSearchExpanded((prev) => {
@@ -1103,6 +1234,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 cwd={cwd}
                 onOpenFile={onOpenFile}
                 onAtMention={onAtMention}
+                onDelete={handleDelete}
                 expandedPaths={expandedPaths}
                 onToggleExpanded={handleToggleExpanded}
                 refreshToken={refreshToken}

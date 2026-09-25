@@ -4,7 +4,10 @@ import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
+let version = "unknown";
+try {
+  version = (JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string }).version;
+} catch { /* package.json unreadable, use default */ }
 let piVersion = "unknown";
 try {
   const piPkgPath = join(configDir, "node_modules/@earendil-works/pi-coding-agent/package.json");
@@ -27,6 +30,9 @@ const nextConfig: NextConfig = {
     "node-pty",
     "undici",
     "web-push",
+    // trash spawns its bundled platform binaries (windows-trash.exe) by a path
+    // relative to its module directory — bundling would lose them.
+    "trash",
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
